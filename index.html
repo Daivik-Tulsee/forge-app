@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<meta name="theme-color" content="#0A0A0F"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="FORGE"/>
+<title>FORGE</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overscroll-behavior:none}
+body{background:#0A0A0F;color:#E8E4DC;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;overflow-x:hidden}
+:root{--bg:#0A0A0F;--card:#12121A;--border:#2A2A3A;--orange:#FF6B35;--teal:#4ECDC4;--green:#A8E6CF;--text:#E8E4DC;--muted:#888888}
+button{cursor:pointer;border:none;background:none;color:#E8E4DC;font-family:inherit}
+input,select,textarea{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;-webkit-appearance:none}
+select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23888' d='M6 8L0 0h12z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
+::-webkit-scrollbar{display:none}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const {useState,useEffect,useCallback,useMemo,useRef}=React;
+const {LineChart,Line,BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,ResponsiveContainer,ReferenceLine,Cell}=Recharts;
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+const PLAN_START='2026-06-01';
+const PLAN_END='2026-11-30';
+const PHASES=[
+  {n:1,label:'Foundation & Fat Loss',start:'2026-06-01',end:'2026-07-15',targetKg:'89–90',desc:'Academic recess, full meal control'},
+  {n:2,label:'Uni Reintegration',start:'2026-07-16',end:'2026-08-31',targetKg:'83–85',desc:'Back at university'},
+  {n:3,label:'Hike Peak & Performance',start:'2026-09-01',end:'2026-09-21',targetKg:'80–82',desc:'3-day hike, taper and prep'},
+  {n:4,label:'Final Push & Finish Line',start:'2026-09-22',end:'2026-11-30',targetKg:'72',desc:'Uni finals'},
+];
+const TRAINING_SPLIT=[
+  'Upper A – Horizontal push/pull + arms',
+  'Boxing Technical – Combinations & footwork',
+  'Lower A – Squat pattern, single-leg, core',
+  'Boxing Conditioning – Heavy bag & circuits',
+  'Upper B – Vertical push/pull + arms',
+  'Boxing Stamina – Full rounds, fight sim',
+  'Lower B + Mobility – Hinge, carries, 20 min flow',
+];
+const DAY_NAMES=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const DEFAULT_HABITS=['12K Steps','Self Care','Spiritual Grounding','Reading','Hydration','No Smoking/Vaping','No Alcohol'];
+const MOOD_LABELS=['','Terrible','Low','Neutral','Good','Energised'];
+const MOOD_EMOJI=['','😣','😔','😐','😊','⚡'];
+const MOOD_COLORS=['','#E24B4A','#EF9F27','#888888','#4ECDC4','#A8E6CF'];
+
+// ─── Utils ────────────────────────────────────────────────────────────────────
+const LS=(k,d)=>{try{const v=localStorage.getItem(k);return v!=null?JSON.parse(v):d;}catch{return d;}};
+const LSS=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}};
+const today=()=>new Date().toISOString().slice(0,10);
+const fmtDate=d=>new Date(d+'T12:00:00').toLocaleDateString('en-ZA',{day:'numeric',month:'short'});
+const daysBetween=(a,b)=>Math.round((new Date(b)-new Date(a))/86400000);
+const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+
+function getCurrentPhase(date=today()){return PHASES.find(p=>date>=p.start&&date<=p.end)||PHASES[PHASES.length-1];}
+function getPhaseDay(date=today()){const p=getCurrentPhase(date);return daysBetween(p.start,date)+1;}
+function getPhaseDuration(p){return daysBetween(p.start,p.end)+1;}
+function getPlanDay(date=today()){return clamp(daysBetween(PLAN_START,date)+1,1,180);}
+function getExpectedWeight(date=today()){
+  const t=clamp(daysBetween(PLAN_START,date)/daysBetween(PLAN_START,PLAN_END),0,1);
+  return 96.5-t*(96.5-72);
+}
+function getTrackStatus(weight,date=today()){
+  if(!weight)return null;
+  const diff=weight-getExpectedWeight(date);
+  if(Math.abs(diff)<=0.5)return'On Track';
+  return diff<-0.5?'Ahead':'Behind';
+}
+const trackColor=s=>s==='On Track'?'#4ECDC4':s==='Ahead'?'#A8E6CF':'#FF6B35';
+
+// ─── Data hook ────────────────────────────────────────────────────────────────
+function useData(){
+  const [records,setRecords]=useState(()=>LS('forge_records',{}));
+  const [habits,setHabits]=useState(()=>LS('forge_habits',DEFAULT_HABITS));
+  const save=(date,patch)=>{
+    setRecords(prev=>{
+      const next={...prev,[date]:{...(prev[date]||{}),...patch}};
+      LSS('forge_records',next);
+      return next;
+    });
+  };
+  const saveHabits=h=>{setHabits(h);LSS('forge_habits',h);};
+  return {records,habits,save,saveHabits};
+}
+
+// ─── Shared UI ────────────────────────────────────────────────────────────────
+const cardStyle={background:'#12121A',border:'1px solid #2A2A3A',borderRadius:12,padding:12,marginBottom:12};
+const inputStyle={width:'100%',background:'#0A0A0F',border:'1px solid #2A2A3A',borderRadius:8,padding:'11px 12px',color:'#E8E4DC',fontSize:15,marginBottom:10,outline:'none',display:'block'};
+const labelStyle={fontSize:11,color:'#888',marginBottom:5,display:'block',fontFamily:'Georgia,serif'};
+const sectionTitle={fontFamily:'Georgia,serif',fontSize:12,color:'#888',marginBottom:8};
+
+function RingProgress({pct,color,size=56,stroke=5,label}){
+  const r=size/2-stroke;
+  const circ=2*Math.PI*r;
+  const dash=clamp(pct,0,100)/100*circ;
+  return React.createElement('div',{style:{display:'flex',flexDirection:'column',alignItems:'center',gap:4}},
+    React.createElement('svg',{width:size,height:size},
+      React.createElement('circle',{cx:size/2,cy:size/2,r,fill:'none',stroke:'#2A2A3A',strokeWidth:stroke}),
+      React.createElement('circle',{cx:size/2,cy:size/2,r,fill:'none',stroke:color,strokeWidth:stroke,
+        strokeDasharray:`${dash} ${circ}`,strokeLinecap:'round',transform:`rotate(-90 ${size/2} ${size/2})`}),
+      React.createElement('text',{x:size/2,y:size/2+4,textAnchor:'middle',fill:'#E8E4DC',fontSize:10,fontFamily:'monospace'},Math.round(pct)+'%')
+    ),
+    React.createElement('span',{style:{fontSize:10,color:'#888'}},label)
+  );
+}
+
+function NavBar({screen,setScreen}){
+  const tabs=[['dashboard','⬛','Home'],['log','➕','Log'],['metrics','📊','Metrics'],['habits','🔥','Habits'],['plan','📅','Plan']];
+  return React.createElement('div',{style:{
+    position:'fixed',bottom:0,left:'50%',transform:'translateX(-50%)',
+    width:'100%',maxWidth:430,
+    background:'#12121A',borderTop:'1px solid #2A2A3A',
+    display:'flex',zIndex:100,
+    paddingBottom:'max(env(safe-area-inset-bottom,0px),8px)',
+    paddingTop:4,
+  }},
+    tabs.map(([id,icon,label])=>React.createElement('button',{
+      key:id,onClick:()=>setScreen(id),
+      style:{flex:1,padding:'6px 0',display:'flex',flexDirection:'column',alignItems:'center',gap:2,fontSize:10,
+        color:screen===id?'#FF6B35':'#888888',fontWeight:screen===id?600:400,minHeight:44}
+    },
+      React.createElement('span',{style:{fontSize:18,lineHeight:1}},icon),
+      label
+    ))
+  );
+}
+
+// ─── Dashboard ────────────────────────────────────────────────────────────────
+function Dashboard({records,habits,setScreen}){
+  const td=today();
+  const rec=records[td]||{};
+  const latestWeight=useMemo(()=>{
+    const dates=Object.keys(records).sort().reverse();
+    for(const d of dates){if(records[d]&&records[d].weight)return{w:records[d].weight,d};}
+    return null;
+  },[records]);
+  const phase=getCurrentPhase();
+  const phaseDay=getPhaseDay();
+  const phaseDur=getPhaseDuration(phase);
+  const planDay=getPlanDay();
+  const trackStatus=latestWeight?getTrackStatus(latestWeight.w,latestWeight.d):null;
+  const wPct=latestWeight?Math.min(100,((96.5-latestWeight.w)/(96.5-72))*100):0;
+
+  const habitsToday=(rec.habits&&habits)?habits.filter(h=>rec.habits[h]===true).length:0;
+  const habitsPct=habits.length?(habitsToday/habits.length)*100:0;
+  const caloriesPct=rec.calories?Math.min(100,(rec.calories/2250)*100):0;
+  const proteinPct=rec.protein?Math.min(100,(rec.protein/200)*100):0;
+  const nutritionPct=rec.calories?(caloriesPct*0.5+proteinPct*0.5):0;
+  const trainPct=rec.sessionRating?100:0;
+
+  const calcStreak=(filterFn)=>{
+    let streak=0;
+    const now=today();
+    let d=new Date(now);
+    while(true){
+      const ds=d.toISOString().slice(0,10);
+      if(ds<PLAN_START)break;
+      const r=records[ds];
+      const isToday=ds===now;
+      const msAgo=Date.now()-new Date(ds+'T23:59:59').getTime();
+      const hoursAgo=msAgo/3600000;
+      if(filterFn(r,isToday,hoursAgo)){streak++;}
+      else if(!isToday)break;
+      d.setDate(d.getDate()-1);
+    }
+    return streak;
+  };
+  const smokeDays=calcStreak((r,isToday,h)=>{
+    if(!r||!r.habits)return isToday?true:h<48;
+    if(r.habits['No Smoking/Vaping']===true)return true;
+    if(r.habits['No Smoking/Vaping']===false)return false;
+    return isToday?true:h<48;
+  });
+  const stepsDays=calcStreak((r,isToday,h)=>{
+    if(!r||r.steps===undefined)return isToday?true:h<48;
+    return (r.steps||0)>=12000;
+  });
+
+  return React.createElement('div',{style:{padding:'16px 16px 88px'}},
+    React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}},
+      React.createElement('h1',{style:{fontFamily:'Georgia,serif',fontSize:28,letterSpacing:3,color:'#FF6B35'}},'\u{1F525} FORGE'),
+      React.createElement('div',{style:{fontFamily:'monospace',fontSize:11,color:'#888',textAlign:'right'}},
+        `Day ${planDay} / 180`
+      )
+    ),
+
+    React.createElement('div',{style:cardStyle},
+      React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}},
+        React.createElement('span',{style:sectionTitle},'Weight Progress'),
+        trackStatus&&React.createElement('span',{style:{fontSize:11,color:trackColor(trackStatus),fontFamily:'monospace',fontWeight:700}},trackStatus)
+      ),
+      React.createElement('div',{style:{display:'flex',alignItems:'baseline',gap:8,marginBottom:10}},
+        React.createElement('span',{style:{fontFamily:'monospace',fontSize:30,fontWeight:700,color:'#E8E4DC'}},(latestWeight?latestWeight.w.toFixed(1):'96.5')+' kg'),
+        React.createElement('span',{style:{fontSize:12,color:'#888'}},`→ 72 kg · ${latestWeight?(latestWeight.w-72).toFixed(1):'24.5'} kg to go`)
+      ),
+      React.createElement('div',{style:{background:'#2A2A3A',borderRadius:100,height:7,overflow:'hidden',position:'relative'}},
+        React.createElement('div',{style:{background:'#FF6B35',height:'100%',width:`${wPct.toFixed(1)}%`,borderRadius:100,transition:'width 0.5s ease'}})
+      ),
+      React.createElement('div',{style:{display:'flex',justifyContent:'space-between',marginTop:4}},
+        React.createElement('span',{style:{fontSize:9,color:'#888',fontFamily:'monospace'}},'96.5 kg'),
+        React.createElement('span',{style:{fontSize:9,color:'#888',fontFamily:'monospace'}},'72 kg')
+      )
+    ),
+
+    React.createElement('div',{style:cardStyle},
+      React.createElement('div',{style:{fontFamily:'Georgia,serif',fontSize:11,color:'#888',marginBottom:2}},`Phase ${phase.n} · ${phase.label}`),
+      React.createElement('div',{style:{fontSize:13,color:'#E8E4DC',fontWeight:600}},`Day ${phaseDay} of ${phaseDur}  ·  Target ${phase.targetKg} kg`),
+      React.createElement('div',{style:{fontSize:11,color:'#888',marginTop:3}},phase.desc)
+    ),
+
+    React.createElement('div',{style:{display:'flex',gap:10,marginBottom:12}},
+      React.createElement(RingProgress,{pct:nutritionPct,color:'#FF6B35',size:64,stroke:5,label:'Nutrition'}),
+      React.createElement(RingProgress,{pct:trainPct,color:'#4ECDC4',size:64,stroke:5,label:'Training'}),
+      React.createElement(RingProgress,{pct:habitsPct,color:'#A8E6CF',size:64,stroke:5,label:'Habits'}),
+    ),
+
+    React.createElement('div',{style:{display:'flex',gap:10,marginBottom:12}},
+      React.createElement('div',{style:{...cardStyle,flex:1,marginBottom:0,display:'flex',alignItems:'center',gap:10}},
+        React.createElement('span',{style:{fontSize:22}},'\uD83D\uDEAD'),
+        React.createElement('div',null,
+          React.createElement('div',{style:{fontFamily:'monospace',fontSize:20,fontWeight:700,color:'#A8E6CF'}},smokeDays),
+          React.createElement('div',{style:{fontSize:10,color:'#888'}},'No Smoking streak')
+        )
+      ),
+      React.createElement('div',{style:{...cardStyle,flex:1,marginBottom:0,display:'flex',alignItems:'center',gap:10}},
+        React.createElement('span',{style:{fontSize:22}},'\uD83D\uDC5F'),
+        React.createElement('div',null,
+          React.createElement('div',{style:{fontFamily:'monospace',fontSize:20,fontWeight:700,color:'#4ECDC4'}},stepsDays),
+          React.createElement('div',{style:{fontSize:10,color:'#888'}},'Steps streak')
+        )
+      )
+    ),
+
+    rec.moodMorning&&React.createElement('div',{style:{...cardStyle,display:'flex',alignItems:'center',gap:10,marginBottom:12}},
+      React.createElement('span',{style:{fontSize:22}},MOOD_EMOJI[rec.moodMorning]),
+      React.createElement('div',null,
+        React.createElement('div',{style:{fontSize:13,color:MOOD_COLORS[rec.moodMorning],fontWeight:600}},MOOD_LABELS[rec.moodMorning]),
+        React.createElement('div',{style:{fontSize:10,color:'#888'}},'Today\'s mood')
+      )
+    ),
+
+    !rec.moodEvening&&React.createElement('div',{style:{...cardStyle,borderColor:'rgba(255,107,53,0.3)',marginBottom:12}},
+      React.createElement('div',{style:{fontSize:12,color:'#FF6B35',fontWeight:600,marginBottom:2}},'\u26A0\uFE0F Evening log not yet completed'),
+      React.createElement('div',{style:{fontSize:11,color:'#888'}},'Tap Log to enter tonight\'s nutrition & habits.')
+    ),
+
+    React.createElement('div',{style:{fontFamily:'Georgia,serif',fontSize:12,color:'#888',marginBottom:8}},'Quick access'),
+    React.createElement('div',{style:{display:'flex',gap:8}},
+      ['Morning','Workout','Evening'].map(t=>React.createElement('button',{key:t,onClick:()=>setScreen('log'),style:{flex:1,background:'#12121A',border:'1px solid #2A2A3A',borderRadius:10,padding:'11px 0',fontSize:12,color:'#E8E4DC',fontWeight:500}},t))
+    )
+  );
+}
+
+// ─── Log Screen ───────────────────────────────────────────────────────────────
+function LogScreen({records,habits,save}){
+  const [tab,setTab]=useState('morning');
+  const td=today();
+  const rec=records[td]||{};
+  const dow=new Date().getDay();
+  const suggestedSession=TRAINING_SPLIT[(dow===0?6:dow-1)];
+
+  const [weight,setWeight]=useState(String(rec.weight||''));
+  const [bf,setBf]=useState(String(rec.bodyFat||''));
+  const [moodM,setMoodM]=useState(rec.moodMorning||0);
+  const [sleep,setSleep]=useState(String(rec.sleep||''));
+
+  const [session,setSession]=useState(rec.session||suggestedSession);
+  const [sessRating,setSessRating]=useState(rec.sessionRating||0);
+  const [sessNotes,setSessNotes]=useState(rec.sessionNotes||'');
+  const [stepsSoFar,setStepsSoFar]=useState(String(rec.stepsSoFar||''));
+
+  const [calories,setCalories]=useState(String(rec.calories||''));
+  const [protein,setProtein]=useState(String(rec.protein||''));
+  const [carbs,setCarbs]=useState(String(rec.carbs||''));
+  const [fats,setFats]=useState(String(rec.fats||''));
+  const [water,setWater]=useState(String(rec.water||''));
+  const [steps,setSteps]=useState(String(rec.steps||''));
+  const [habitVals,setHabitVals]=useState(rec.habits||{});
+  const [moodE,setMoodE]=useState(rec.moodEvening||0);
+  const [notes,setNotes]=useState(rec.notes||'');
+
+  const toggleHabit=h=>setHabitVals(p=>({...p,[h]:!p[h]}));
+
+  const saveMorning=()=>{
+    save(td,{weight:parseFloat(weight)||undefined,bodyFat:parseFloat(bf)||undefined,moodMorning:moodM||undefined,sleep:parseFloat(sleep)||undefined});
+    alert('✅ Morning logged!');
+  };
+  const saveWorkout=()=>{
+    save(td,{session,sessionRating:sessRating||undefined,sessionNotes:sessNotes||undefined,stepsSoFar:parseInt(stepsSoFar)||undefined});
+    alert('✅ Workout logged!');
+  };
+  const saveEvening=()=>{
+    const stepsN=parseInt(steps)||0;
+    const finalHabits={...habitVals};
+    if(stepsN>=12000)finalHabits['12K Steps']=true;
+    save(td,{calories:parseFloat(calories)||undefined,protein:parseFloat(protein)||undefined,carbs:parseFloat(carbs)||undefined,fats:parseFloat(fats)||undefined,water:parseFloat(water)||undefined,steps:stepsN||undefined,habits:finalHabits,moodEvening:moodE||undefined,notes:notes||undefined});
+    alert('✅ Evening logged!');
+  };
+
+  const MoodPicker=({value,onChange,color})=>React.createElement('div',{style:{display:'flex',gap:6,marginBottom:14}},
+    [1,2,3,4,5].map(v=>React.createElement('button',{key:v,onClick:()=>onChange(v),style:{flex:1,padding:'11px 0',borderRadius:8,background:value===v?color:'#12121A',border:`1px solid ${value===v?color:'#2A2A3A'}`,fontSize:20,lineHeight:1}},MOOD_EMOJI[v]))
+  );
+
+  const btnPrimary=(color,text,onClick)=>React.createElement('button',{onClick,style:{width:'100%',background:color,borderRadius:10,padding:14,fontSize:15,fontWeight:700,color:color==='#4ECDC4'?'#0A0A0F':'#fff',marginTop:4,letterSpacing:0.5}},text);
+
+  return React.createElement('div',{style:{padding:'16px 16px 88px'}},
+    React.createElement('h2',{style:{fontFamily:'Georgia,serif',fontSize:20,marginBottom:12,color:'#FF6B35'}},'\uD83D\uDCCB Log · '+fmtDate(td)),
+    React.createElement('div',{style:{display:'flex',background:'#12121A',borderRadius:10,padding:3,marginBottom:16,border:'1px solid #2A2A3A'}},
+      [['morning','Morning'],['workout','Workout'],['evening','Evening']].map(([id,l])=>
+        React.createElement('button',{key:id,onClick:()=>setTab(id),style:{flex:1,padding:'9px 0',borderRadius:8,background:tab===id?'#FF6B35':'transparent',color:tab===id?'#fff':'#888',fontSize:12,fontWeight:tab===id?700:400}},l)
+      )
+    ),
+
+    tab==='morning'&&React.createElement('div',null,
+      React.createElement('label',{style:labelStyle},'Weight (kg)'),
+      React.createElement('input',{style:inputStyle,type:'number',inputMode:'decimal',step:'0.1',placeholder:'e.g. 95.2',value:weight,onChange:e=>setWeight(e.target.value)}),
+      React.createElement('label',{style:labelStyle},'Body Fat % (optional)'),
+      React.createElement('input',{style:inputStyle,type:'number',inputMode:'decimal',step:'0.1',placeholder:'e.g. 28.5',value:bf,onChange:e=>setBf(e.target.value)}),
+      React.createElement('label',{style:labelStyle},'Sleep (hours)'),
+      React.createElement('input',{style:inputStyle,type:'number',inputMode:'decimal',step:'0.5',placeholder:'e.g. 7.5',value:sleep,onChange:e=>setSleep(e.target.value)}),
+      React.createElement('label',{style:labelStyle},`Morning Mood${moodM?' · '+MOOD_LABELS[moodM]:''}`),
+      React.createElement(MoodPicker,{value:moodM,onChange:setMoodM,color:'#FF6B35'}),
+      btnPrimary('#FF6B35','Save Morning Log',saveMorning)
+    ),
+
+    tab==='workout'&&React.createElement('div',null,
+      React.createElement('label',{style:labelStyle},'Session (auto-suggested for today)'),
+      React.createElement('select',{style:{...inputStyle,paddingRight:32},value:session,onChange:e=>setSession(e.target.value)},
+        TRAINING_SPLIT.map(s=>React.createElement('option',{key:s,value:s},s))
+      ),
+      React.createElement('label',{style:labelStyle},`Session Rating${sessRating?' · '+sessRating+'/5':''}`),
+      React.createElement('div',{style:{display:'flex',gap:8,marginBottom:14}},
+        [1,2,3,4,5].map(v=>React.createElement('button',{key:v,onClick:()=>setSessRating(v),style:{flex:1,padding:'11px 0',borderRadius:8,background:sessRating===v?'#4ECDC4':'#12121A',border:`1px solid ${sessRating===v?'#4ECDC4':'#2A2A3A'}`,fontSize:15,fontWeight:700,color:sessRating===v?'#0A0A0F':'#888',fontFamily:'monospace'}},v))
+      ),
+      React.createElement('label',{style:labelStyle},'Steps so far today'),
+      React.createElement('input',{style:inputStyle,type:'number',inputMode:'numeric',placeholder:'e.g. 6,500',value:stepsSoFar,onChange:e=>setStepsSoFar(e.target.value)}),
+      React.createElement('label',{style:labelStyle},'Session notes'),
+      React.createElement('textarea',{style:{...inputStyle,height:90,resize:'none'},placeholder:'How did it feel? What went well?',value:sessNotes,onChange:e=>setSessNotes(e.target.value)}),
+      btnPrimary('#4ECDC4','Save Workout Log',saveWorkout)
+    ),
+
+    tab==='evening'&&React.createElement('div',null,
+      React.createElement('label',{style:labelStyle},'Calories (kcal) — paste from FatSecret'),
+      React.createElement('input',{style:inputStyle,type:'number',inputMode:'numeric',placeholder:'Target: 2,250',value:calories,onChange:e=>setCalories(e.target.value)}),
+      React.createElement('div',{style:{display:'flex',justifyContent:'space-between',gap:4,fontSize:11,color:'#888',marginBottom:4}},
+        React.createElement('span',{style:{color:parseFloat(calories)>2250?'#E24B4A':parseFloat(calories)>2000?'#4ECDC4':'#888'}},calories?`${parseFloat(calories)} kcal`:''),
+        React.createElement('span',{style:{color:'#888'}},'(flex: 2,100–2,250 kcal)')
+      ),
+      React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:10}},
+        [['Protein (g)','200g target',protein,setProtein],['Carbs (g)','~190g',carbs,setCarbs],['Fats (g)','~60g',fats,setFats]].map(([label,ph,val,set])=>
+          React.createElement('div',{key:label},
+            React.createElement('label',{style:{...labelStyle,fontSize:10}},label),
+            React.createElement('input',{style:{...inputStyle,marginBottom:0,padding:'9px 8px',fontSize:13},type:'number',inputMode:'numeric',placeholder:ph,value:val,onChange:e=>set(e.target.value)})
+          )
+        )
+      ),
+      React.createElement('label',{style:{...labelStyle,marginTop:4}},'Water consumed (litres)'),
+      React.createElement('input',{style:inputStyle,type:'number',inputMode:'decimal',step:'0.1',placeholder:'Target: 3.0',value:water,onChange:e=>setWater(e.target.value)}),
+      React.createElement('label',{style:labelStyle},'Total steps today'),
+      React.createElement('input',{style:inputStyle,type:'number',inputMode:'numeric',placeholder:'Target: 12,000 → auto-ticks 12K Steps habit',value:steps,onChange:e=>setSteps(e.target.value)}),
+      React.createElement('label',{style:{...labelStyle,marginTop:4,marginBottom:8}},'Habits'),
+      habits.map(h=>{
+        const checked=habitVals[h]===true;
+        return React.createElement('div',{key:h,onClick:()=>toggleHabit(h),style:{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px',background:'#12121A',borderRadius:8,marginBottom:6,border:`1px solid ${checked?'#A8E6CF':'#2A2A3A'}`,cursor:'pointer'}},
+          React.createElement('span',{style:{fontSize:13,color:checked?'#A8E6CF':'#E8E4DC',fontWeight:checked?600:400}},h),
+          React.createElement('div',{style:{width:24,height:24,borderRadius:6,border:`2px solid ${checked?'#A8E6CF':'#2A2A3A'}`,background:checked?'#A8E6CF':'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}},
+            checked&&React.createElement('span',{style:{color:'#0A0A0F',fontSize:15,fontWeight:700,lineHeight:1}},'✓')
+          )
+        );
+      }),
+      React.createElement('label',{style:{...labelStyle,marginTop:8}},`Evening Mood${moodE?' · '+MOOD_LABELS[moodE]:''}`),
+      React.createElement(MoodPicker,{value:moodE,onChange:setMoodE,color:'#FF6B35'}),
+      React.createElement('label',{style:labelStyle},'Notes (optional)'),
+      React.createElement('textarea',{style:{...inputStyle,height:80,resize:'none'},placeholder:'Anything notable today?',value:notes,onChange:e=>setNotes(e.target.value)}),
+      btnPrimary('#FF6B35','Save Evening Log',saveEvening)
+    )
+  );
+}
+
+// ─── Metrics Screen ───────────────────────────────────────────────────────────
+function MetricsScreen({records}){
+  const [range,setRange]=useState('30');
+  const cutoff=useMemo(()=>{
+    const now=today();
+    if(range==='7'){const d=new Date(now);d.setDate(d.getDate()-6);return d.toISOString().slice(0,10);}
+    if(range==='30'){const d=new Date(now);d.setDate(d.getDate()-29);return d.toISOString().slice(0,10);}
+    if(range==='phase')return getCurrentPhase().start;
+    return PLAN_START;
+  },[range]);
+
+  const data=useMemo(()=>Object.keys(records).filter(d=>d>=cutoff&&d<=today()).sort().map(d=>({date:d,fmt:fmtDate(d),...records[d]})),[records,cutoff]);
+
+  const axisStyle={fontSize:9,fill:'#888'};
+  const ttStyle={background:'#12121A',border:'1px solid #2A2A3A',borderRadius:8,fontSize:11,color:'#E8E4DC',padding:'6px 10px'};
+  const cp={margin:{top:4,right:4,bottom:0,left:-16}};
+
+  return React.createElement('div',{style:{padding:'16px 16px 88px'}},
+    React.createElement('h2',{style:{fontFamily:'Georgia,serif',fontSize:20,marginBottom:12,color:'#FF6B35'}},'📊 Metrics'),
+    React.createElement('div',{style:{display:'flex',background:'#12121A',borderRadius:10,padding:3,marginBottom:16,border:'1px solid #2A2A3A'}},
+      [['7','7 days'],['30','30 days'],['phase','Phase'],['all','All 180']].map(([v,l])=>
+        React.createElement('button',{key:v,onClick:()=>setRange(v),style:{flex:1,padding:'8px 0',borderRadius:8,background:range===v?'#FF6B35':'transparent',color:range===v?'#fff':'#888',fontSize:11,fontWeight:range===v?700:400}},l)
+      )
+    ),
+    data.length===0&&React.createElement('div',{style:{textAlign:'center',color:'#888',marginTop:80,fontSize:14}},
+      React.createElement('div',{style:{fontSize:32,marginBottom:12}},'📋'),
+      'No data yet for this range.',
+      React.createElement('br',null),'Start logging to see your trends!'
+    ),
+    data.length>0&&React.createElement('div',null,
+      React.createElement('div',{style:cardStyle},
+        React.createElement('div',{style:sectionTitle},'Weight (kg)'),
+        React.createElement(ResponsiveContainer,{width:'100%',height:150},
+          React.createElement(LineChart,{data,...cp},
+            React.createElement(CartesianGrid,{strokeDasharray:'3 3',stroke:'#2A2A3A'}),
+            React.createElement(XAxis,{dataKey:'fmt',tick:axisStyle}),
+            React.createElement(YAxis,{tick:axisStyle,domain:['dataMin - 2','dataMax + 1']}),
+            React.createElement(Tooltip,{contentStyle:ttStyle}),
+            React.createElement(ReferenceLine,{y:72,stroke:'rgba(255,107,53,0.6)',strokeDasharray:'5 3',label:{value:'72 kg target',fill:'#FF6B35',fontSize:9,position:'insideBottomRight'}}),
+            React.createElement(Line,{type:'monotone',dataKey:'weight',stroke:'#4ECDC4',strokeWidth:2,dot:{fill:'#4ECDC4',r:3},connectNulls:true,name:'Weight (kg)'})
+          )
+        )
+      ),
+      React.createElement('div',{style:cardStyle},
+        React.createElement('div',{style:sectionTitle},'Protein (g) — target 200g'),
+        React.createElement(ResponsiveContainer,{width:'100%',height:120},
+          React.createElement(BarChart,{data,...cp},
+            React.createElement(CartesianGrid,{strokeDasharray:'3 3',stroke:'#2A2A3A'}),
+            React.createElement(XAxis,{dataKey:'fmt',tick:axisStyle}),
+            React.createElement(YAxis,{tick:axisStyle}),
+            React.createElement(Tooltip,{contentStyle:ttStyle}),
+            React.createElement(ReferenceLine,{y:200,stroke:'rgba(168,230,207,0.7)',strokeDasharray:'4 2'}),
+            React.createElement(Bar,{dataKey:'protein',radius:[3,3,0,0],name:'Protein (g)'},
+              data.map((e,i)=>React.createElement(Cell,{key:i,fill:(e.protein||0)>=200?'#A8E6CF':'#FF6B35'}))
+            )
+          )
+        )
+      ),
+      React.createElement('div',{style:cardStyle},
+        React.createElement('div',{style:sectionTitle},'Calories — target 2,250 kcal'),
+        React.createElement(ResponsiveContainer,{width:'100%',height:120},
+          React.createElement(BarChart,{data,...cp},
+            React.createElement(CartesianGrid,{strokeDasharray:'3 3',stroke:'#2A2A3A'}),
+            React.createElement(XAxis,{dataKey:'fmt',tick:axisStyle}),
+            React.createElement(YAxis,{tick:axisStyle}),
+            React.createElement(Tooltip,{contentStyle:ttStyle}),
+            React.createElement(ReferenceLine,{y:2250,stroke:'rgba(78,205,196,0.7)',strokeDasharray:'4 2'}),
+            React.createElement(Bar,{dataKey:'calories',fill:'#4ECDC4',radius:[3,3,0,0],name:'Calories (kcal)'})
+          )
+        )
+      ),
+      React.createElement('div',{style:cardStyle},
+        React.createElement('div',{style:sectionTitle},'Mood (1–5)'),
+        React.createElement(ResponsiveContainer,{width:'100%',height:110},
+          React.createElement(LineChart,{data,...cp},
+            React.createElement(CartesianGrid,{strokeDasharray:'3 3',stroke:'#2A2A3A'}),
+            React.createElement(XAxis,{dataKey:'fmt',tick:axisStyle}),
+            React.createElement(YAxis,{tick:axisStyle,domain:[0,5]}),
+            React.createElement(Tooltip,{contentStyle:ttStyle}),
+            React.createElement(Line,{type:'monotone',dataKey:'moodMorning',stroke:'#A8E6CF',strokeWidth:2,dot:false,connectNulls:true,name:'Morning Mood'}),
+            React.createElement(Line,{type:'monotone',dataKey:'moodEvening',stroke:'#FF6B35',strokeWidth:1.5,dot:false,connectNulls:true,strokeDasharray:'4 2',name:'Evening Mood'})
+          )
+        )
+      ),
+      React.createElement('div',{style:cardStyle},
+        React.createElement('div',{style:sectionTitle},'Daily Steps — target 12,000'),
+        React.createElement(ResponsiveContainer,{width:'100%',height:110},
+          React.createElement(BarChart,{data,...cp},
+            React.createElement(CartesianGrid,{strokeDasharray:'3 3',stroke:'#2A2A3A'}),
+            React.createElement(XAxis,{dataKey:'fmt',tick:axisStyle}),
+            React.createElement(YAxis,{tick:axisStyle}),
+            React.createElement(Tooltip,{contentStyle:ttStyle}),
+            React.createElement(ReferenceLine,{y:12000,stroke:'rgba(255,107,53,0.6)',strokeDasharray:'4 2'}),
+            React.createElement(Bar,{dataKey:'steps',radius:[3,3,0,0],name:'Steps'},
+              data.map((e,i)=>React.createElement(Cell,{key:i,fill:(e.steps||0)>=12000?'#A8E6CF':'#4ECDC4'}))
+            )
+          )
+        )
+      ),
+      React.createElement('div',{style:cardStyle},
+        React.createElement('div',{style:sectionTitle},'Water (litres) — target 3 L'),
+        React.createElement(ResponsiveContainer,{width:'100%',height:110},
+          React.createElement(BarChart,{data,...cp},
+            React.createElement(CartesianGrid,{strokeDasharray:'3 3',stroke:'#2A2A3A'}),
+            React.createElement(XAxis,{dataKey:'fmt',tick:axisStyle}),
+            React.createElement(YAxis,{tick:axisStyle}),
+            React.createElement(Tooltip,{contentStyle:ttStyle}),
+            React.createElement(ReferenceLine,{y:3,stroke:'rgba(78,205,196,0.6)',strokeDasharray:'4 2'}),
+            React.createElement(Bar,{dataKey:'water',radius:[3,3,0,0],name:'Water (L)'},
+              data.map((e,i)=>React.createElement(Cell,{key:i,fill:(e.water||0)>=3?'#4ECDC4':'#2A2A3A'}))
+            )
+          )
+        )
+      ),
+      data.some(r=>r.bodyFat)&&React.createElement('div',{style:cardStyle},
+        React.createElement('div',{style:sectionTitle},'Body Fat %'),
+        React.createElement(ResponsiveContainer,{width:'100%',height:110},
+          React.createElement(LineChart,{data,...cp},
+            React.createElement(CartesianGrid,{strokeDasharray:'3 3',stroke:'#2A2A3A'}),
+            React.createElement(XAxis,{dataKey:'fmt',tick:axisStyle}),
+            React.createElement(YAxis,{tick:axisStyle}),
+            React.createElement(Tooltip,{contentStyle:ttStyle}),
+            React.createElement(Line,{type:'monotone',dataKey:'bodyFat',stroke:'#FF6B35',strokeWidth:2,dot:{fill:'#FF6B35',r:3},connectNulls:true,name:'Body Fat %'})
+          )
+        )
+      )
+    )
+  );
+}
+
+// ─── Habits Screen ────────────────────────────────────────────────────────────
+function HabitsScreen({records,habits,saveHabits}){
+  const [editing,setEditing]=useState(false);
+  const [newHabit,setNewHabit]=useState('');
+
+  const allPlanDays=useMemo(()=>{
+    const days=[];let d=new Date(PLAN_START);
+    while(d.toISOString().slice(0,10)<=PLAN_END){days.push(d.toISOString().slice(0,10));d.setDate(d.getDate()+1);}
+    return days;
+  },[]);
+
+  const getStats=useCallback((habit)=>{
+    const now=today();
+    let streak=0,longest=0,cur=0,total=0,logged=0;
+    let prev=null;
+    for(const d of allPlanDays){
+      const r=records[d];
+      const val=r?.habits?.[habit];
+      const isToday=d===now;
+      const msAgo=Date.now()-new Date(d+'T23:59:59').getTime();
+      const hoursAgo=msAgo/3600000;
+      if(val===true){total++;logged++;if(prev){const diff=daysBetween(prev,d);cur=diff===1?cur+1:1;}else cur=1;longest=Math.max(longest,cur);prev=d;}
+      else if(val===false){logged++;cur=0;prev=null;}
+    }
+    // streak calculation: walk backwards
+    streak=0;
+    let dd=new Date(now);
+    while(true){
+      const ds=dd.toISOString().slice(0,10);
+      if(ds<PLAN_START)break;
+      const r=records[ds];
+      const isToday=ds===now;
+      const hoursAgo=(Date.now()-new Date(ds+'T23:59:59').getTime())/3600000;
+      const val=r?.habits?.[habit];
+      if(val===true){streak++;}
+      else if(val===false){break;}
+      else if(!isToday&&hoursAgo>48){break;}
+      else if(isToday){/* no log yet today — grace */}
+      else{/* within 48h grace */}
+      dd.setDate(dd.getDate()-1);
+    }
+    const pct=logged>0?Math.round(total/logged*100):0;
+    return{streak,longest,total,pct};
+  },[records,allPlanDays]);
+
+  const addHabit=()=>{if(newHabit.trim()&&!habits.includes(newHabit.trim())){saveHabits([...habits,newHabit.trim()]);setNewHabit('');}};
+
+  return React.createElement('div',{style:{padding:'16px 16px 88px'}},
+    React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}},
+      React.createElement('h2',{style:{fontFamily:'Georgia,serif',fontSize:20,color:'#FF6B35'}},'🔥 Habits'),
+      React.createElement('button',{onClick:()=>setEditing(!editing),style:{fontSize:12,color:editing?'#A8E6CF':'#4ECDC4',border:'1px solid #2A2A3A',borderRadius:8,padding:'7px 14px',background:'#12121A',fontWeight:600}},editing?'Done':'Edit')
+    ),
+    editing&&React.createElement('div',{style:{display:'flex',gap:8,marginBottom:14}},
+      React.createElement('input',{style:{flex:1,background:'#0A0A0F',border:'1px solid #2A2A3A',borderRadius:8,padding:'10px 12px',color:'#E8E4DC',fontSize:13,outline:'none'},placeholder:'New habit name...',value:newHabit,onChange:e=>setNewHabit(e.target.value),onKeyDown:e=>e.key==='Enter'&&addHabit()}),
+      React.createElement('button',{onClick:addHabit,style:{background:'#FF6B35',borderRadius:8,padding:'10px 16px',color:'#fff',fontSize:13,fontWeight:700}},'Add')
+    ),
+    habits.map(h=>{
+      const{streak,longest,total,pct}=getStats(h);
+      return React.createElement('div',{key:h,style:cardStyle},
+        React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}},
+          React.createElement('span',{style:{fontFamily:'Georgia,serif',fontSize:14,color:'#E8E4DC',fontWeight:700}},h),
+          editing&&React.createElement('button',{onClick:()=>saveHabits(habits.filter(x=>x!==h)),style:{fontSize:10,color:'#E24B4A',border:'1px solid rgba(226,75,74,0.4)',borderRadius:6,padding:'4px 10px',background:'transparent'}},'Remove')
+        ),
+        React.createElement('div',{style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:6,marginBottom:10}},
+          [['🔥',streak,'streak'],['⭐',longest,'best'],['✅',total,'days'],['📊',pct+'%','rate']].map(([icon,val,lbl])=>
+            React.createElement('div',{key:lbl,style:{background:'#0A0A0F',borderRadius:8,padding:'6px 4px',textAlign:'center',border:'1px solid #2A2A3A'}},
+              React.createElement('div',{style:{fontFamily:'monospace',fontSize:14,fontWeight:700,color:'#FF6B35'}},icon+' '+val),
+              React.createElement('div',{style:{fontSize:9,color:'#888',marginTop:2}},lbl)
+            )
+          )
+        ),
+        React.createElement('div',{style:{display:'flex',flexWrap:'wrap',gap:2}},
+          allPlanDays.map(d=>{
+            const val=records[d]?.habits?.[h];
+            const bg=val===true?'#A8E6CF':val===false?'rgba(226,75,74,0.4)':d<=today()?'#1A1A2A':'#12121A';
+            return React.createElement('div',{key:d,title:d,style:{width:7,height:7,borderRadius:1.5,background:bg,flexShrink:0}});
+          })
+        ),
+        React.createElement('div',{style:{display:'flex',gap:12,marginTop:6}},
+          React.createElement('span',{style:{fontSize:9,color:'#A8E6CF'}},'\u25A0 Done'),
+          React.createElement('span',{style:{fontSize:9,color:'rgba(226,75,74,0.6)'}},'\u25A0 Skipped'),
+          React.createElement('span',{style:{fontSize:9,color:'#1A1A2A'}},'\u25A0 No log')
+        )
+      );
+    })
+  );
+}
+
+// ─── Plan Screen ──────────────────────────────────────────────────────────────
+function PlanScreen(){
+  const phase=getCurrentPhase();
+  const dow=new Date().getDay();
+  const todayIdx=dow===0?6:dow-1;
+
+  return React.createElement('div',{style:{padding:'16px 16px 88px'}},
+    React.createElement('h2',{style:{fontFamily:'Georgia,serif',fontSize:20,marginBottom:14,color:'#FF6B35'}},'📅 Plan'),
+
+    React.createElement('div',{style:{...sectionTitle,marginBottom:8}},'The 4 Phases'),
+    PHASES.map(p=>{
+      const active=p.n===phase.n;
+      return React.createElement('div',{key:p.n,style:{...cardStyle,border:`1px solid ${active?'#FF6B35':'#2A2A3A'}`,background:active?'rgba(255,107,53,0.06)':'#12121A'}},
+        React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:3}},
+          React.createElement('span',{style:{fontFamily:'Georgia,serif',fontWeight:700,color:active?'#FF6B35':'#E8E4DC',fontSize:14}},`Phase ${p.n}: ${p.label}`),
+          active&&React.createElement('span',{style:{fontSize:9,background:'#FF6B35',color:'#fff',borderRadius:4,padding:'3px 7px',flexShrink:0,marginLeft:8,alignSelf:'center'}},'NOW')
+        ),
+        React.createElement('div',{style:{fontSize:11,color:'#888',fontFamily:'monospace'}},`${fmtDate(p.start)} – ${fmtDate(p.end)}`),
+        React.createElement('div',{style:{fontSize:12,color:'#4ECDC4',marginTop:2}},`Target: ${p.targetKg} kg`),
+        React.createElement('div',{style:{fontSize:11,color:'#888',marginTop:2}},p.desc)
+      );
+    }),
+
+    React.createElement('div',{style:{...sectionTitle,marginTop:4}},'Weekly Training Split'),
+    React.createElement('div',{style:cardStyle},
+      DAY_NAMES.map((day,i)=>React.createElement('div',{key:day,style:{display:'flex',alignItems:'flex-start',gap:10,padding:'8px 0',borderBottom:i<6?'1px solid #2A2A3A':'none',background:i===todayIdx?'rgba(255,107,53,0.04)':'transparent'}},
+        React.createElement('span',{style:{fontFamily:'monospace',fontSize:11,color:i===todayIdx?'#FF6B35':'#888',minWidth:32,paddingTop:1,fontWeight:i===todayIdx?700:400}},day),
+        React.createElement('span',{style:{fontSize:12,color:i===todayIdx?'#FF6B35':'#E8E4DC',flex:1,lineHeight:1.4,fontWeight:i===todayIdx?600:400}},TRAINING_SPLIT[i])
+      ))
+    ),
+
+    React.createElement('div',{style:sectionTitle},'Daily Nutrition Targets'),
+    React.createElement('div',{style:cardStyle},
+      [['Calories','2,250 kcal','#FF6B35'],['Protein','200 g','#4ECDC4'],['Carbs','~190 g','#A8E6CF'],['Fats','~60 g','#888888'],['Water','3 L','#4ECDC4'],['Steps','12,000 / day','#FF6B35']].map(([label,val,color])=>
+        React.createElement('div',{key:label,style:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'7px 0',borderBottom:'1px solid #2A2A3A'}},
+          React.createElement('span',{style:{fontSize:12,color:'#888'}},label),
+          React.createElement('span',{style:{fontFamily:'monospace',fontSize:13,color,fontWeight:700}},val)
+        )
+      ),
+      React.createElement('div',{style:{fontSize:10,color:'#888',marginTop:8,fontStyle:'italic'}},'Note: 200g protein + 190g carbs + 60g fats = 2,100 kcal. The 150 kcal gap is intentional flex room.')
+    ),
+
+    React.createElement('div',{style:sectionTitle},'Adjustment Rules'),
+    React.createElement('div',{style:cardStyle},
+      [
+        ['No weight change for 2 weeks','→ Cut 100 kcal OR add 1,500 steps daily'],
+        ['Lost 1.3+ kg in a single week','→ Add 150–200 kcal'],
+        ['Training quality dropping','→ Check sleep. Add 50 g carbs pre-workout'],
+        ['Hunger unmanageable','→ Add 100 g potatoes + more non-starchy veg'],
+        ['Missed protein target','→ Casein shake before bed'],
+        ['Sick or injured','→ Eat at maintenance, rest, recover'],
+      ].map(([cond,act],i)=>
+        React.createElement('div',{key:i,style:{marginBottom:i<5?10:0,paddingBottom:i<5?10:0,borderBottom:i<5?'1px solid #2A2A3A':'none'}},
+          React.createElement('div',{style:{fontSize:12,color:'#E8E4DC',fontWeight:600,marginBottom:2}},cond),
+          React.createElement('div',{style:{fontSize:11,color:'#4ECDC4'}},act)
+        )
+      )
+    ),
+
+    React.createElement('div',{style:sectionTitle},'Protocol Reminders'),
+    React.createElement('div',{style:cardStyle},
+      [
+        'Refeed days every 10–14 days — bump carbs to ~300 g, calories to maintenance',
+        'Diet break on Saturdays — eat at maintenance (~2,200 kcal)',
+        'Phase 3 (Sep): swap regular cardio for Stairmaster during taper week',
+        'Weigh daily at same time (morning, after bathroom, before eating)',
+        'Track food via FatSecret — paste totals into the evening log',
+        'Progress photos every 2 weeks (same lighting, same time of day)',
+      ].map((r,i)=>
+        React.createElement('div',{key:i,style:{display:'flex',gap:8,padding:'6px 0',borderBottom:i<5?'1px solid #2A2A3A':'none',alignItems:'flex-start'}},
+          React.createElement('span',{style:{color:'#FF6B35',flexShrink:0,fontWeight:700,marginTop:1}},'\u2192'),
+          React.createElement('span',{style:{fontSize:11,color:'#E8E4DC',lineHeight:1.5}},r)
+        )
+      )
+    )
+  );
+}
+
+// ─── App Root ─────────────────────────────────────────────────────────────────
+function App(){
+  const{records,habits,save,saveHabits}=useData();
+  const[screen,setScreen]=useState('dashboard');
+  const screens={
+    dashboard:React.createElement(Dashboard,{records,habits,save,setScreen}),
+    log:React.createElement(LogScreen,{records,habits,save}),
+    metrics:React.createElement(MetricsScreen,{records}),
+    habits:React.createElement(HabitsScreen,{records,habits,saveHabits}),
+    plan:React.createElement(PlanScreen),
+  };
+  return React.createElement('div',{style:{maxWidth:430,margin:'0 auto',minHeight:'100dvh',position:'relative',background:'#0A0A0F'}},
+    React.createElement('div',{style:{overflowY:'auto',height:'100dvh',WebkitOverflowScrolling:'touch'}},
+      screens[screen]
+    ),
+    React.createElement(NavBar,{screen,setScreen})
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>
