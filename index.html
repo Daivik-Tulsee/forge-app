@@ -114,7 +114,7 @@ function RingProgress({pct,color,size=56,stroke=5,label}){
 }
 
 function NavBar({screen,setScreen}){
-  const tabs=[['dashboard','⬛','Home'],['log','➕','Log'],['metrics','📊','Metrics'],['habits','🔥','Habits'],['plan','📅','Plan']];
+  const tabs=[['dashboard','⬛','Home'],['log','➕','Log'],['metrics','📊','Metrics'],['habits','🔥','Habits'],['workouts','💪','Train'],['plan','📅','Plan']];
   return React.createElement('div',{style:{
     position:'fixed',bottom:0,left:'50%',transform:'translateX(-50%)',
     width:'100%',maxWidth:430,
@@ -683,6 +683,215 @@ function PlanScreen(){
 }
 
 // ─── App Root ─────────────────────────────────────────────────────────────────
+// ─── Workouts Screen ──────────────────────────────────────────────────────────
+const WORKOUTS={
+  'Upper A':{
+    day:'Monday',
+    title:'Upper A — Horizontal Push/Pull + Arms',
+    warmup:'Thoracic rotations, band pull-aparts, shoulder CARs — 8 min',
+    duration:'60–70 min',
+    type:'lift',
+    exercises:[
+      {n:1,name:'Barbell Bench Press',sets:'4 × 5',notes:'Main strength lift. Add 2.5 kg when all reps clean.'},
+      {n:2,name:'Barbell Bent-Over Row',sets:'4 × 6',notes:'Equal push/pull ratio — critical for shoulder health + boxing power.'},
+      {n:3,name:'Incline Dumbbell Press',sets:'3 × 10',notes:'Upper chest, secondary hypertrophy stimulus.'},
+      {n:4,name:'Seated Cable Row',sets:'3 × 12',notes:'Mid-back thickness.'},
+      {n:5,name:'Incline Dumbbell Curl',sets:'3 × 12',notes:'Stretched position. Lengthened training = greater hypertrophy.'},
+      {n:6,name:'Overhead Tricep Extension',sets:'3 × 12',notes:'Long head emphasis. Stretched position — lagging arm fix.'},
+      {n:7,name:'Pallof Press',sets:'3 × 12/side',notes:'Anti-rotation core. More functional than crunches.'},
+    ]
+  },
+  'Boxing Technical':{
+    day:'Tuesday',
+    title:'Boxing — Technical',
+    duration:'60 min',
+    type:'boxing',
+    structure:[
+      '5 min jump rope',
+      '10 min shadowboxing — footwork + combos 1–4',
+      '3×3 min jab-cross-hook drilling (60s rest)',
+      '3×3 min combination work',
+      '10 min defence — slips, rolls, pivots',
+      'Cool down',
+    ]
+  },
+  'Lower A':{
+    day:'Wednesday',
+    title:'Lower A — Squat Pattern + Single Leg',
+    warmup:'90/90 hip stretch, ankle circles, goblet squat × 10 — 8 min',
+    duration:'60–70 min',
+    type:'lift',
+    exercises:[
+      {n:1,name:'Barbell Back Squat',sets:'4 × 5',notes:'Main strength lift. 5 kg progression when all reps clean.'},
+      {n:2,name:'Bulgarian Split Squat',sets:'3 × 8/side',notes:'Single-leg stability — boxing footwork directly transfers.'},
+      {n:3,name:'Leg Press',sets:'3 × 12',notes:'Volume accumulation without axial loading fatigue.'},
+      {n:4,name:'Walking Lunges',sets:'3 × 10/side',notes:'Loaded mobility + glute stimulus.'},
+      {n:5,name:'Leg Curl (Machine)',sets:'3 × 12',notes:'Hamstring balance relative to quad dominance.'},
+      {n:6,name:"Farmer's Carry",sets:'3 × 40m',notes:'Grip, core, posture. Massively underused warrior staple.'},
+      {n:7,name:'Dead Bug',sets:'3 × 8/side',notes:'Anti-extension core. Spine stability under load.'},
+    ]
+  },
+  'Boxing Conditioning':{
+    day:'Thursday',
+    title:'Boxing — Conditioning',
+    duration:'50 min',
+    type:'boxing',
+    structure:[
+      '5 min jump rope',
+      '5×3 min heavy bag full power (60s rest)',
+      '3 rounds bag circuit: 20 punches + 10 push-ups + 10 squat jumps (45s rest)',
+      '2×2 min speed bag',
+      '3 min plank circuit',
+    ]
+  },
+  'Upper B':{
+    day:'Friday',
+    title:'Upper B — Vertical Push/Pull + Arms',
+    warmup:'Lat hang, shoulder CARs, wall slides — 8 min',
+    duration:'60–70 min',
+    type:'lift',
+    exercises:[
+      {n:1,name:'Overhead Press (Barbell)',sets:'4 × 5',notes:'Main strength lift. Shoulder/core demand is high — brace properly.'},
+      {n:2,name:'Weighted Pull-Ups',sets:'4 × 5',notes:'Add weight progressively. Bodyweight if not yet at weighted stage.'},
+      {n:3,name:'Dumbbell Lateral Raise',sets:'3 × 15',notes:'Shoulder width. Important for warrior aesthetic and shoulder health.'},
+      {n:4,name:'Cable Lat Pulldown',sets:'3 × 10',notes:'Lat width and supplementary pull volume.'},
+      {n:5,name:'Hammer Curls',sets:'3 × 12',notes:'Brachialis emphasis — adds arm thickness beyond standard curls.'},
+      {n:6,name:'Close-Grip Bench Press',sets:'3 × 10',notes:'Tricep mass builder. Stretched position at bottom.'},
+      {n:7,name:'Face Pulls',sets:'3 × 15',notes:'Rear delt + rotator cuff. Injury prevention for boxing.'},
+    ]
+  },
+  'Boxing Stamina':{
+    day:'Saturday',
+    title:'Boxing — Stamina',
+    duration:'60–70 min',
+    type:'boxing',
+    structure:[
+      '5 min jump rope',
+      '8–10×3 min continuous rounds on bag (60s rest) — fight simulator',
+      '1×2 min all-out burnout round',
+      '10 min cool down walk + full stretch',
+      'Add 1 round every 2 weeks',
+    ]
+  },
+  'Lower B':{
+    day:'Sunday',
+    title:'Lower B + Mobility — Hinge Pattern + Carries + Flow',
+    warmup:'Hip flexor stretch, RDL with pause at bottom — 8 min',
+    duration:'70–80 min',
+    type:'lift',
+    exercises:[
+      {n:1,name:'Conventional Deadlift',sets:'4 × 4',notes:'Heaviest lift of the week. Form is everything — film your sets.'},
+      {n:2,name:'Hip Thrust (Barbell)',sets:'3 × 10',notes:'Glute power output transfers directly to punching and footwork.'},
+      {n:3,name:'Single-Leg RDL',sets:'3 × 8/side',notes:'Balance, hamstring strength, proprioception.'},
+      {n:4,name:'Suitcase Carry',sets:'3 × 40m/side',notes:'Anti-lateral flexion. Obliques and grip under real load.'},
+      {n:5,name:'Cable Pull-Through',sets:'3 × 15',notes:'Hip hinge pattern reinforcement at lighter load.'},
+      {n:6,name:'Mobility Flow',sets:'20 min',notes:'See protocol below.'},
+    ],
+    mobility:[
+      '90/90 hip switches × 10',
+      'Hip flexor lunge stretch — 60s each side',
+      'Thoracic spine foam roll — 2 min',
+      'Thread-the-needle rotation — 8 reps each side',
+      'Downward dog to cobra — 10 reps',
+      'Hamstring contract-relax stretch — 45s each side',
+      'Shoulder cross-body + sleeper stretch — 45s each side',
+      'Deep squat hold — 60s',
+    ]
+  },
+};
+
+const SESSION_ORDER=['Upper A','Boxing Technical','Lower A','Boxing Conditioning','Upper B','Boxing Stamina','Lower B'];
+
+function WorkoutsScreen(){
+  const [selected,setSelected]=useState('Upper A');
+  const dow=new Date().getDay();
+  const todaySession=SESSION_ORDER[dow===0?6:dow-1];
+  const w=WORKOUTS[selected];
+
+  return React.createElement('div',{style:{padding:'16px 16px 88px'}},
+    React.createElement('h2',{style:{fontFamily:'Georgia,serif',fontSize:20,marginBottom:12,color:'#FF6B35'}},'💪 Workouts'),
+
+    React.createElement('div',{style:{overflowX:'auto',marginBottom:14,paddingBottom:4}},
+      React.createElement('div',{style:{display:'flex',gap:6,width:'max-content'}},
+        SESSION_ORDER.map(id=>{
+          const isToday=id===todaySession;
+          const isSelected=id===selected;
+          const isBoxing=WORKOUTS[id].type==='boxing';
+          return React.createElement('button',{key:id,onClick:()=>setSelected(id),style:{
+            padding:'7px 12px',borderRadius:20,fontSize:11,fontWeight:isSelected?700:400,whiteSpace:'nowrap',
+            background:isSelected?(isBoxing?'#4ECDC4':'#FF6B35'):'#12121A',
+            color:isSelected?'#0A0A0F':'#888',
+            border:`1px solid ${isSelected?(isBoxing?'#4ECDC4':'#FF6B35'):isToday?'rgba(255,107,53,0.4)':'#2A2A3A'}`,
+          }},
+            (isToday?'⚡ ':'')+WORKOUTS[id].day
+          );
+        })
+      )
+    ),
+
+    React.createElement('div',{style:{...cardStyle,borderColor:w.type==='boxing'?'rgba(78,205,196,0.3)':'rgba(255,107,53,0.3)'}},
+      React.createElement('div',{style:{fontFamily:'Georgia,serif',fontSize:15,fontWeight:700,color:w.type==='boxing'?'#4ECDC4':'#FF6B35',marginBottom:4}},w.title),
+      React.createElement('div',{style:{display:'flex',gap:10,alignItems:'center',marginBottom:w.warmup?8:0}},
+        React.createElement('span',{style:{fontSize:11,color:'#888',fontFamily:'monospace'}},w.duration),
+        React.createElement('span',{style:{fontSize:11,color:w.type==='boxing'?'#4ECDC4':'#FF6B35',background:w.type==='boxing'?'rgba(78,205,196,0.1)':'rgba(255,107,53,0.1)',padding:'2px 8px',borderRadius:10}}),
+        w.type==='boxing'
+          ? React.createElement('span',{style:{fontSize:10,background:'rgba(78,205,196,0.12)',color:'#4ECDC4',padding:'2px 8px',borderRadius:10,border:'1px solid rgba(78,205,196,0.2)'}},'Boxing')
+          : React.createElement('span',{style:{fontSize:10,background:'rgba(255,107,53,0.12)',color:'#FF6B35',padding:'2px 8px',borderRadius:10,border:'1px solid rgba(255,107,53,0.2)'}},'Lift')
+      ),
+      w.warmup&&React.createElement('div',{style:{fontSize:11,color:'#888',fontStyle:'italic',paddingTop:4,borderTop:'1px solid #2A2A3A',marginTop:4}},
+        '🔥 Warm-up: '+w.warmup
+      )
+    ),
+
+    w.type==='lift'&&React.createElement('div',null,
+      React.createElement('div',{style:{...cardStyle,padding:0,overflow:'hidden'}},
+        React.createElement('div',{style:{display:'grid',gridTemplateColumns:'28px 1fr auto',background:'rgba(255,107,53,0.15)',padding:'8px 12px',gap:8}},
+          React.createElement('span',{style:{fontSize:10,color:'#FF6B35',fontWeight:700}},'#'),
+          React.createElement('span',{style:{fontSize:10,color:'#FF6B35',fontWeight:700}},'EXERCISE'),
+          React.createElement('span',{style:{fontSize:10,color:'#FF6B35',fontWeight:700}},'SETS × REPS')
+        ),
+        w.exercises.map((ex,i)=>React.createElement('div',{key:ex.n,style:{padding:'10px 12px',borderTop:'1px solid #2A2A3A',background:i%2===0?'#12121A':'#0E0E16'}},
+          React.createElement('div',{style:{display:'grid',gridTemplateColumns:'28px 1fr auto',gap:8,alignItems:'start',marginBottom:ex.notes?4:0}},
+            React.createElement('span',{style:{fontFamily:'monospace',fontSize:12,color:'#888',paddingTop:1}},ex.n),
+            React.createElement('span',{style:{fontSize:13,color:'#E8E4DC',fontWeight:500}},ex.name),
+            React.createElement('span',{style:{fontFamily:'monospace',fontSize:12,color:'#4ECDC4',fontWeight:700,whiteSpace:'nowrap'}},ex.sets)
+          ),
+          ex.notes&&React.createElement('div',{style:{fontSize:11,color:'#888',paddingLeft:36,lineHeight:1.4}},ex.notes)
+        ))
+      ),
+      w.mobility&&React.createElement('div',null,
+        React.createElement('div',{style:{fontFamily:'Georgia,serif',fontSize:12,color:'#4ECDC4',marginBottom:8,marginTop:4}},'Sunday Mobility Flow (20 min)'),
+        React.createElement('div',{style:cardStyle},
+          w.mobility.map((item,i)=>React.createElement('div',{key:i,style:{display:'flex',gap:8,padding:'6px 0',borderBottom:i<w.mobility.length-1?'1px solid #2A2A3A':'none',alignItems:'flex-start'}},
+            React.createElement('span',{style:{fontFamily:'monospace',fontSize:10,color:'#4ECDC4',minWidth:20,paddingTop:2}},String(i+1).padStart(2,'0')),
+            React.createElement('span',{style:{fontSize:12,color:'#E8E4DC',lineHeight:1.4}},item)
+          ))
+        )
+      )
+    ),
+
+    w.type==='boxing'&&React.createElement('div',null,
+      React.createElement('div',{style:{fontFamily:'Georgia,serif',fontSize:12,color:'#888',marginBottom:8}},'Session Structure'),
+      React.createElement('div',{style:cardStyle},
+        w.structure.map((step,i)=>React.createElement('div',{key:i,style:{display:'flex',gap:10,padding:'8px 0',borderBottom:i<w.structure.length-1?'1px solid #2A2A3A':'none',alignItems:'flex-start'}},
+          React.createElement('div',{style:{width:20,height:20,borderRadius:'50%',background:'rgba(78,205,196,0.15)',border:'1px solid rgba(78,205,196,0.3)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:1}},
+            React.createElement('span',{style:{fontFamily:'monospace',fontSize:9,color:'#4ECDC4',fontWeight:700}},i+1)
+          ),
+          React.createElement('span',{style:{fontSize:12,color:'#E8E4DC',lineHeight:1.5}},step)
+        ))
+      ),
+      React.createElement('div',{style:{...cardStyle,borderColor:'rgba(78,205,196,0.2)',background:'rgba(78,205,196,0.04)'}},
+        React.createElement('div',{style:{fontSize:11,color:'#4ECDC4',fontWeight:600,marginBottom:4}},'What this session builds'),
+        React.createElement('div',{style:{fontSize:11,color:'#888',lineHeight:1.6}},[
+          'Technical sessions build skill and combinations.',
+          'Conditioning sessions build work capacity.',
+          'Stamina sessions build fight endurance.',
+        ].find((_,i)=>['Boxing Technical','Boxing Conditioning','Boxing Stamina'][i]===selected)||'')
+      )
+    )
+  );
+}
+
 function App(){
   const{records,habits,save,saveHabits}=useData();
   const[screen,setScreen]=useState('dashboard');
@@ -691,6 +900,7 @@ function App(){
     log:React.createElement(LogScreen,{records,habits,save}),
     metrics:React.createElement(MetricsScreen,{records}),
     habits:React.createElement(HabitsScreen,{records,habits,saveHabits}),
+    workouts:React.createElement(WorkoutsScreen),
     plan:React.createElement(PlanScreen),
   };
   return React.createElement('div',{style:{maxWidth:430,margin:'0 auto',minHeight:'100dvh',position:'relative',background:'#0A0A0F'}},
